@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build
+        run: cross build --release --target aarch64-unknown-linux-musl
+
+      - name: Prepare artifacts
+        run: |
+          cp target/aarch64-unknown-linux-musl/release/mlock-mappings mlock-mappings-aarch64
+          sha256sum mlock-mappings-aarch64 > mlock-mappings-aarch64.sha256
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            mlock-mappings-aarch64
+            mlock-mappings-aarch64.sha256
