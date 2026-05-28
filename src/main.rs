@@ -71,7 +71,7 @@ fn lock_region(mapping: &Mapping) -> Result<LockedRegion, String> {
             std::ptr::null_mut(),
             mapping.len,
             libc::PROT_READ,
-            libc::MAP_PRIVATE,
+            libc::MAP_SHARED,
             file.as_raw_fd(),
             mapping.offset as libc::off_t,
         )
