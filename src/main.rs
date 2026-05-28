@@ -117,6 +117,7 @@ fn main() {
 
     let mut locked: Vec<LockedRegion> = Vec::new();
     let mut total: usize = 0;
+    let mut failed = false;
 
     for mapping in &mappings {
         match lock_region(mapping) {
@@ -128,8 +129,16 @@ fn main() {
                 total += mapping.len;
                 locked.push(region);
             }
-            Err(e) => eprintln!("FAILED: {e}"),
+            Err(e) => {
+                eprintln!("FAILED: {e}");
+                failed = true;
+            }
         }
+    }
+
+    if failed {
+        eprintln!("\naborting — not all regions could be locked");
+        std::process::exit(1);
     }
 
     // After target regions — MCL_FUTURE would cause mmap failures above.
