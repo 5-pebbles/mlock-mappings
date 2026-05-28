@@ -2,13 +2,12 @@
 
 Lock a process's file-backed pages into RAM so it survives having its backing storage overwritten.
 
-Parses `/proc/<pid>/maps`, mmaps the same file regions into its own address space, and mlocks them - pinning the shared page cache pages in physical memory. The target process's page table entries resolve to the same frames, so it won't fault on disk reads that no longer exist. 🍭
+Parses `/proc/<pid>/maps` and opens each file-backed region through `/proc/<pid>/map_files/` — which resolves to the actual backing file the kernel is using, not whatever the path on disk points to now. This means upgraded-in-place binaries are handled correctly. Each region is mmapped and mlocked, pinning the shared page cache pages in physical memory. 🍭
 
 ## 🍫 Usage
 
 ```sh
-mlock-mappings 1              # by PID
-mlock-mappings /proc/1/maps   # by maps file path
+mlock-mappings 1   # lock all of init's file-backed pages
 ```
 
 The process stays alive holding the locks. Kill it when you're done. 🍩

@@ -8,19 +8,16 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(
     about = "Lock file-backed pages from a process's address space into RAM",
-    after_help = "\
-EXAMPLES:
-  mlock-mappings 1              Lock init's file-backed pages
-  mlock-mappings /proc/1/maps   Same, with explicit path"
+    after_help = "EXAMPLES:\n  mlock-mappings 1   Lock init's file-backed pages"
 )]
 struct Args {
-    /// PID or path to a /proc/<pid>/maps file
-    #[arg(value_name = "PID|PATH")]
-    maps: String,
+    /// Target process ID
+    pid: u32,
 }
 
 struct Mapping {
-    path: String,
+    name: String,
+    map_file: PathBuf,
     offset: u64,
     len: usize,
 }
@@ -38,31 +35,36 @@ impl Drop for LockedRegion {
     }
 }
 
-fn parse_mapping(line: &str) -> Option<Mapping> {
+fn parse_mapping(pid: u32, line: &str) -> Option<Mapping> {
     let fields: Vec<&str> = line.split_whitespace().collect();
     if fields.len() < 6 {
         return None;
     }
 
-    let path = fields[5..].join(" ");
-    if !path.starts_with('/') {
+    let name = fields[5..].join(" ");
+    if !name.starts_with('/') {
         return None;
     }
 
-    let (start, end) = fields[0].split_once('-')?;
+    let range = fields[0];
+    let (start, end) = range.split_once('-')?;
     let start = usize::from_str_radix(start, 16).ok()?;
     let end = usize::from_str_radix(end, 16).ok()?;
     let offset = u64::from_str_radix(fields[2], 16).ok()?;
 
+    let map_file = PathBuf::from(format!("/proc/{pid}/map_files/{range}"));
+
     Some(Mapping {
-        path,
+        name,
+        map_file,
         offset,
         len: end - start,
     })
 }
 
 fn lock_region(mapping: &Mapping) -> Result<LockedRegion, String> {
-    let file = fs::File::open(&mapping.path).map_err(|e| format!("{}: {e}", mapping.path))?;
+    let file = fs::File::open(&mapping.map_file)
+        .map_err(|e| format!("{}: {e}", mapping.map_file.display()))?;
 
     let addr = unsafe {
         libc::mmap(
@@ -77,7 +79,7 @@ fn lock_region(mapping: &Mapping) -> Result<LockedRegion, String> {
     if addr == libc::MAP_FAILED {
         return Err(format!(
             "mmap {}: {}",
-            mapping.path,
+            mapping.name,
             io::Error::last_os_error()
         ));
     }
@@ -88,7 +90,7 @@ fn lock_region(mapping: &Mapping) -> Result<LockedRegion, String> {
         }
         return Err(format!(
             "mlock {}: {}",
-            mapping.path,
+            mapping.name,
             io::Error::last_os_error()
         ));
     }
@@ -102,17 +104,16 @@ fn lock_region(mapping: &Mapping) -> Result<LockedRegion, String> {
 fn main() {
     let args = Args::parse();
 
-    let maps_path = match args.maps.parse::<u32>() {
-        Ok(pid) => PathBuf::from(format!("/proc/{pid}/maps")),
-        Err(_) => PathBuf::from(&args.maps),
-    };
-
+    let maps_path = format!("/proc/{}/maps", args.pid);
     let content = fs::read_to_string(&maps_path).unwrap_or_else(|e| {
-        eprintln!("failed to read {}: {e}", maps_path.display());
+        eprintln!("failed to read {maps_path}: {e}");
         std::process::exit(1);
     });
 
-    let mappings: Vec<Mapping> = content.lines().filter_map(parse_mapping).collect();
+    let mappings: Vec<Mapping> = content
+        .lines()
+        .filter_map(|line| parse_mapping(args.pid, line))
+        .collect();
 
     let mut locked: Vec<LockedRegion> = Vec::new();
     let mut total: usize = 0;
@@ -122,7 +123,7 @@ fn main() {
             Ok(region) => {
                 eprintln!(
                     "{:>10}  {}+{:#x}",
-                    mapping.len, mapping.path, mapping.offset
+                    mapping.len, mapping.name, mapping.offset
                 );
                 total += mapping.len;
                 locked.push(region);
